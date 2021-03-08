@@ -54,18 +54,21 @@
         )
     ))
     
-;sets a value to an already declared value
-(define setValue
-    (lambda (var val state return) ;'(()())
-        (if (eq? var (caar state)
-            (list (car return) (cons (cdr return) val))
-            (setValue var val (list (cdar state) (cddr state)) (list (cons ((car return) (caar state))) (cons ((cdr return) (cddr state))))
+;helper function for setValue
+(define setValue-helper
 
+    (lambda (var val state return)
+      (cond
+        ((null? (car state)) (return '() '()))
+        ((eq? (caar state) var) (return (car state) (cons val (cddr state))))
+        (else (setValue-help var val (cons (cdar state) (cddr state)) (lambda (v w) (return (cons (caar state) v) (cons (cadr state) w)))))
 
-            ;(cons (car state)(cons val (cddr state)))
-            ;(cons(list (caar state) (cadr state))(setValue var val (list (cdar state) (cddr state))))
-        ))
     )))
+
+;sets the value of a declared variable 
+(define setValue
+    (lambda (var val state)
+    (setValue-helper var val state (lambda (v w) (list v w))))
 
 (define leftoperand (lambda (exp) (cadr exp)))
 (define operator (lambda (exp) (car exp)))
