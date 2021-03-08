@@ -16,19 +16,24 @@
 
 (define evalfile
     (lambda (lis state)
-        ((null? lis) (error))
-        ((eq? (car (car lis)) 'return) #|Mstate return|##)
-        (else (evalfile (cdr lis) (evaluate (car lis) state)))))
+        ((null? lis) (error 'nothing_here_bro))
+        ((eq? (car (car lis)) 'return) (M-return arg1 state))
+        (else (evalfile (cdr lis) (M-state-statement (car lis) state)))))
 
-(define evaluate
+(define arg1 (lambda lis) (cadr lis))
+(define arg2 (lambda lis) (caddr lis))
+(define arg3 (lambda lis) (cadddr) lis)
+
+(define M-state-statement
     (lambda (statement state)
     (cond
-    ((eq? (car statement) 'var) #| mstate for var assignment |# )
-    ((eq? (car statement) '=) #|mstate for =|#)
-    ((eq? (car statement) 'return) #|mstate for return|#)
-    ((eq? (car statement) 'if) #|mstate for if|#)
-    ((eq? (car statement) 'while) #|mstate for while|#)
-    (else (error)))))
+        ((eq? (car statement) 'var) #| mstate for var assignment |# )
+        ((eq? (car statement) '=) #|mstate for =|#)
+        ((eq? (car statement) 'if) (if (null? (cdddr))
+                                     (M-if (arg1 statement) (arg2 statement) state)
+                                     (M-if-else (arg1 statement) (arg2 statement) (arg3 statement) state)))
+        ((eq? (car statement) 'while) (M-while (arg1 statement) (arg2 statement) state))
+        (else (error 'bad_operator)))))
 
 ;returns if the variable is declared in a given state
 (define declared
@@ -48,6 +53,19 @@
             (getValue (list (cdar state) (cddr state)))
         )
     ))
+    
+;sets a value to an already declared value
+(define setValue
+    (lambda (var val state return) ;'(()())
+        (if (eq? var (caar state)
+            (list (car return) (cons (cdr return) val))
+            (setValue var val (list (cdar state) (cddr state)) (list (cons ((car return) (caar state))) (cons ((cdr return) (cddr state))))
+
+
+            ;(cons (car state)(cons val (cddr state)))
+            ;(cons(list (caar state) (cadr state))(setValue var val (list (cdar state) (cddr state))))
+        ))
+    )))
 
 (define leftoperand (lambda (exp) (cadr exp)))
 (define operator (lambda (exp) (car exp)))
@@ -60,44 +78,60 @@
             (if (or ((eq? (leftoperand exp) #t) ((eq? leftoperand exp) #f)))
             'bool
             'int
-            )
+            ))))
 
-(define M-statement
+;((x y) (3 4))
+;(x = x + 3)
+; (= x (+ x 3))
+
+(define M-value
     (lambda (exp state)
-        (if (eq? (checkType exp) 'bool)
-            ; returns bool
+        (if(list? exp) 
+            (if (eq? (checkType exp) 'bool)
+                ; returns bool
+                (cond
+                    ((eq? (operator exp) '!) (M-boolean exp not))
+                    ((eq? (operator exp) '==) (M-boolean exp eq?))
+                    ((eq? (operator exp) '!=) (M-boolean exp (lambda (v w) (not (eq? v w)))))
+                    ((eq? (operator exp) '&&) (M-boolean exp and))
+                    ((eq? (operator exp) '||) (M-boolean exp or)))
+                    (else (error 'bad_operator))
+            
+                ; returns bool
+                (cond
+                    ((eq? (operator exp) '==) (M-compare exp eq?))
+                    ((eq? (operator exp) '!=) (M-compare exp (lambda (v w) (not (eq? v w)))))
+                    ((eq? (operator exp) '>=) (M-compare exp >=))
+                    ((eq? (operator exp) '<=) (M-compare exp <=))
+                    ((eq? (operator exp) '<) (M-compare exp <))
+                    ((eq? (operator exp) '>) (M-compare exp >))
+                    ; return int
+                    (else (M-integer exp)))
+                )
             (cond
-                ((eq? (operator exp) '!) (M-boolean exp not))
-                ((eq? (operator exp) '==) (M-boolean exp eq?))
-                ((eq? (operator exp) '!=) (M-boolean exp (lambda (v w) (not (eq? v w)))))
-                ((eq? (operator exp) '&&) (M-boolean exp and))
-                ((eq? (operator exp) '||) (M-boolean exp or)))
-            )
-            ; returns bool
-            (cond
-                ((eq? (operator exp) '==) (M-compare exp eq?))
-                ((eq? (operator exp) '!=) (M-compare exp (lambda (v w) (not (eq? v w)))))
-                ((eq? (operator exp) '>=) (M-compare exp >=))
-                ((eq? (operator exp) '<=) (M-compare exp <=))
-                ((eq? (operator exp) '<) (M-compare exp <))
-                ((eq? (operator exp) '>) (M-compare exp >))
-                ; return int
-                (else (M-integer exp)))
-        )
+                ((eq? exp 'true) #t)
+                ((eq? exp 'false) #f)
+                ((number? exp) exp)
+                ((if (declared exp state))
+                    (getValue exp state)
+                    (error 'bad_operator) ))
+                
+        )))
 
 ; (== (== x x) y)
 (define M-boolean
     (lambda (exp op)
         (if (eq? op not) 
-            (M-statement(leftoperand exp))
-            (op (M-statement(leftoperand exp)) (M-statement(rightoperand exp)))
+            (M-value(leftoperand exp))
+            (op (M-value(leftoperand exp)) (M-value(rightoperand exp)))
 
 (define M-compare
     (lambda (exp op)
-        (op (M-statement(leftoperand exp)) (M-statement(rightoperand exp))))
+        (op (M-value(leftoperand exp)) (M-value(rightoperand exp))))
     ))
 
 ;(M-integer '(* (+ 4 3) (- 2 1))) => 7
+; make '- negative
 (define M-integer
   (lambda (exp)
     (cond
@@ -107,33 +141,45 @@
       ((eq? (operator exp) '*) (floor(* (M-integer (leftoperand exp) (M-integer (rightoperand exp))))))
       ((eq? (operator exp) '%) (modulo (M-integer (leftoperand exp) (M-integer (rightoperand exp)))))
       ((eq? (operator exp) '/) (quotient (M-integer (leftoperand exp) (M-integer (rightoperand exp)))))
-      (else (error 'bad operator))))
+      (else (error 'bad_operator))))
 
 (define M-if
-    (lambda (exp statement1 statement2 state) 
-        (if (M-boolean exp)
-        
-        (else)))
+    (lambda (condition statement1 state) 
+        (if (M-value condition state)
+            (M-state-statement statement1 (M-state-statement condition state)
+            (M-state-statement condition state))
+        )))
+
+(define M-if-else
+    (lambda (condition statement1 statement2 state)
+        (if (M-value condition state)
+            (M-state-statement statement1 (M-state-statement condition state))
+            (M-state-statement statement2 (M-state-statement condition state)
+            ))))
 
 (define M-while
-    (lambda (exp body state)
-        (if (M-boolean exp)
-            (M-while exp body (M-statement body (M-boolean exp state)))
-            state
-    )))
+    (lambda (condition body state)
+        (if (M-value condition)
+            (M-while condition body (M-state-statement body (M-state-statement condition state)))
+            (M-state-statement condition state)
+            )))
 
 (define M-return
-    (lambda (return exp state)
-    ))
+    (lambda (exp state)
+        (M-value exp state))
+    )
 
 (define M-assignment
     (lambda (var exp state)
+        (setValue var (M-value exp state) state )
     ))
 
 (define M-declaration
-    (lambda (var value state)
-        (cond
-            ((null? value) error)
+    (lambda (var state)
+        (cons (cons (var (car state))) (cons ('error (cdr state))))
+    ))
 
-    
+(define M-declaration-val
+    (lambda (var value state)
+        (cons (cons (var (car state))) (cons ((M-value value state) (cdr state))))
     ))
