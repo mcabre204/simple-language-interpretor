@@ -1,8 +1,6 @@
 #lang racket
-
 (require "simpleParser.rkt")
 (require "lex.rkt")
-
 ;;===============================================================
 ;; The Interpreter
 ;; Jake Prusky, Marco Cabre, Morris Lee
@@ -11,178 +9,151 @@
 
 (define interpret
 	(lambda (file)
-		 (parser file)))
-
+		 (evalfile (parser file) '((return_value) (error)))))
 
 (define evalfile
     (lambda (lis state)
       (cond
-        ((null? lis) (error 'nothing_here_bro))
-        ((eq? (car (car lis)) 'return) (M-return arg1 state))
-        (else (evalfile (cdr lis) (M-state-statement (car lis) state))))))
+        ((not(eq? (getValue 'return_value state) 'error)) (getValue 'return_value state))
+        ((null? lis)                   (error 'nothing_here_bro))
+        ;((eq? (car (car lis)) 'return) (getValue 'return_value (M-return (cadar lis) state)))
+        (else                          (evalfile (cdr lis) (M-state-statement (car lis) state))))))
 
+;argument helpers
 (define arg1 (lambda (lis) (cadr lis)))
 (define arg2 (lambda (lis) (caddr lis)))
-(define arg3 (lambda (lis) (cadddr) lis))
+(define arg3 (lambda (lis) (cadddr lis)))
 
-(define M-state-statement
-    (lambda (statement state)
-    (cond
-        ((eq? (car statement) 'var) #| mstate for var assignment |# )
-        ((eq? (car statement) '=) #|mstate for =|#)
-        ((eq? (car statement) 'if) (if (null? (cdddr))
-                                     (M-if (arg1 statement) (arg2 statement) state)
-                                     (M-if-else (arg1 statement) (arg2 statement) (arg3 statement) state)))
-        ((eq? (car statement) 'while) (M-while (arg1 statement) (arg2 statement) state))
-        (else (error 'bad_operator)))))
+;get left and right operands and operator
+(define leftoperand (lambda (exp) (cadr exp)))
+(define operator (lambda (exp) (car exp)))
+(define rightoperand (lambda (exp) (caddr exp)))
 
 ;returns if the variable is declared in a given state
 (define declared
     (lambda (var state)
         (cond
-        ((null? (car state)) #f)
-        ((eq? var (caar state)) #t)
-        (else (declared var (cdar state)))
-        )
-    ))
+            ((null? state)          #f)
+            ((null? (car state))    #f)
+            ((eq? var 'return_value) #t)
+            ((eq? var (caar state)) #t)
+            (else                   (declared var (list (cdar state) (cdadr state)))))))
 
 ;gets the value of a declared variable in a state
 (define getValue
     (lambda (var state)
         (if (eq? var (caar state))
-            (cadr state)
-            (getValue (list (cdar state) (cddr state)))
-        )
-    ))
+            (caadr state)
+            (getValue var (list (cdar state) (cdadr state))))))
     
 ;helper function for setValue
 (define setValue-helper
-
     (lambda (var val state return)
       (cond
-        ((null? (car state)) (return '() '()))
-        ((eq? (caar state) var) (return (car state) (cons val (cddr state))))
-        (else (setValue-helper var val (cons (cdar state) (cddr state)) (lambda (v w) (return (cons (caar state) v) (cons (cadr state) w)))))
+        ((null? (car state))    (return (list var) (list val)))
+        ((eq? (caar state) var) (return (car state) (cons val (cdadr state))))
+        (else                   (setValue-helper var val (list (cdar state) (cdadr state)) (lambda (v w) (return (cons (caar state) v) (cons (caadr state) w))))))))
 
-    )))
-
-;sets the value of a declared variable 
+;sets the value of a declared variable, if the variable is not declared, declare with input value 
 (define setValue
     (lambda (var val state)
-    (setValue-helper var val state (lambda (v w) (list v w)))))
+        (setValue-helper var val state (lambda (v w) (list v w)))))
 
-(define leftoperand (lambda (exp) (cadr exp)))
-(define operator (lambda (exp) (car exp)))
-(define rightoperand (lambda (exp) (caddr exp)))
+(define M-state-statement
+    (lambda (statement state)
+        (cond
+            ((eq? (car statement) 'var)   (if (eq? (length statement) 2)
+                                            (M-declaration (arg1 statement) state)
+                                            (M-declaration-val (arg1 statement) (M-value (arg2 statement) state) state)))
+            ((eq? (car statement) '=)     (M-assignment (arg1 statement)  (M-value (arg2 statement) state) state))
+            ((eq? (car statement) 'if)    (if (eq? (length statement) 3)
+                                            (M-if (arg1 statement) (arg2 statement) state)
+                                            (M-if-else (arg1 statement) (arg2 statement) (arg3 statement) state)))
+            ((eq? (car statement) 'while) (M-while (arg1 statement) (arg2 statement) state))
+            ((eq? (car statement) 'return) (M-return (arg1 statement) state))
+            (else                         (error 'bad_operator)))))
 
-(define checkType
-    (lambda (exp)
-        (if (list? (leftoperand exp))
-            (checkType (leftoperand exp))
-            (if (or ((eq? (leftoperand exp) #t) ((eq? leftoperand exp) #f)))
-            'bool
-            'int
-            ))))
-
-;((x y) (3 4))
-;(x = x + 3)
-; (= x (+ x 3))
+;helper functions for and and or because racket is stupid
+(define myor (lambda (v w) (or v w)))
+(define myand (lambda (v w) (and v w)))
 
 (define M-value
     (lambda (exp state)
-        (if(list? exp) 
-            (if (eq? (checkType exp) 'bool)
-                ; returns bool
-                (cond
-                    ((eq? (operator exp) '!) (M-boolean exp (not)))
-                    ((eq? (operator exp) '==) (M-boolean exp (eq?)))
-                    ((eq? (operator exp) '!=) (M-boolean exp (lambda (v w) (not (eq? v w)))))
-                    ((eq? (operator exp) '&&) (M-boolean exp (and)))
-                    ((eq? (operator exp) '||) (M-boolean exp (or)))
-                    (else (error 'bad_operator)))
-            
-                ; returns bool
-                (cond
-                    ((eq? (operator exp) '==) (M-compare exp eq?))
-                    ((eq? (operator exp) '!=) (M-compare exp (lambda (v w) (not (eq? v w)))))
-                    ((eq? (operator exp) '>=) (M-compare exp >=))
-                    ((eq? (operator exp) '<=) (M-compare exp <=))
-                    ((eq? (operator exp) '<) (M-compare exp <))
-                    ((eq? (operator exp) '>) (M-compare exp >))
-                    ; return int
-                    (else (M-integer exp)))
-                )
+        (if (list? exp) 
             (cond
-                ((eq? exp 'true) #t)
-                ((eq? exp 'false) #f)
-                ((number? exp) exp)
-                ((if (declared exp state)
-                    (getValue exp state)
-                    (error 'bad_operator)))))))
-               
+               ((eq? (operator exp) '!)     (M-boolean exp not state))
+               ((eq? (operator exp) '==)    (M-boolean exp eq? state))
+               ((eq? (operator exp) '!=)    (M-boolean exp (lambda (v w) (not (eq? v w))) state))
+               ((eq? (operator exp) '&&)    (M-boolean exp myand state))
+               ((eq? (operator exp) '||)    (M-boolean exp myor state))  
+               ((eq? (operator exp) '>=)    (M-boolean exp >= state))
+               ((eq? (operator exp) '<=)    (M-boolean exp <= state))
+               ((eq? (operator exp) '<)     (M-boolean exp < state))
+               ((eq? (operator exp) '>)     (M-boolean exp > state))    
+               ((eq? (operator exp) '+)     (M-integer exp + state))
+               ((eq? (operator exp) '-)     (M-integer exp - state))
+               ((eq? (operator exp) '*)     (M-integer exp * state))
+               ((eq? (operator exp) '%)     (M-integer exp modulo state))
+               ((eq? (operator exp) '/)     (M-integer exp / state))
+               (else                        (error 'bad_operator)))
+            (cond
+                ((or (eq? exp 'true) (eq? exp #t))          'true)
+                ((or (eq? exp 'false) (eq? exp #f))          'false)
+                ((number? exp)              exp)
+                ((not (declared exp state)) (error 'undeclared_variable))
+                ((eq? (getValue exp state) 'error) (error 'unassigned_variable))
+                (else (getValue exp state))))))
 
-; (== (== x x) y)
 (define M-boolean
-    (lambda (exp op)
+    (lambda (exp op state)
         (if (eq? op not) 
-            (M-value(leftoperand exp))
-            (op (M-value(leftoperand exp)) (M-value(rightoperand exp))))))
+            (not(M-value (leftoperand exp) state))
+            (op (M-value (leftoperand exp) state) (M-value (rightoperand exp) state)))))
 
-(define M-compare
-    (lambda (exp op)
-        (op (M-value(leftoperand exp)) (M-value(rightoperand exp))))
-    )
-
-;(M-integer '(* (+ 4 3) (- 2 1))) => 7
-; make '- negative
 (define M-integer
-  (lambda (exp)
-    (cond
-      ((number? (leftoperand) exp))
-      ((eq? (operator exp) '+) (+ (M-integer(leftoperand exp) (M-integer (rightoperand exp)))))
-      ((eq? (operator exp) '-) (- (M-integer (leftoperand exp) (M-integer (rightoperand exp)))))
-      ((eq? (operator exp) '*) (floor(* (M-integer (leftoperand exp) (M-integer (rightoperand exp))))))
-      ((eq? (operator exp) '%) (modulo (M-integer (leftoperand exp) (M-integer (rightoperand exp)))))
-      ((eq? (operator exp) '/) (quotient (M-integer (leftoperand exp) (M-integer (rightoperand exp)))))
-      (else (error 'bad_operator)))))
+  (lambda (exp op state)
+    (if (null? (cddr exp))
+        (M-value (- (leftoperand exp)) state)
+        (op (M-value (leftoperand exp) state) (M-value (rightoperand exp) state)))))
 
 (define M-if
     (lambda (condition statement1 state) 
         (if (M-value condition state)
             (M-state-statement statement1 (M-state-statement condition state))
-            (M-state-statement condition state))
-        ))
+            (M-state-statement condition state))))
 
 (define M-if-else
     (lambda (condition statement1 statement2 state)
         (if (M-value condition state)
-            (M-state-statement statement1 (M-state-statement condition state))
-            (M-state-statement statement2 (M-state-statement condition state)
-            ))))
+            (M-state-statement statement1 state)
+            (M-state-statement statement2 state))))
 
 (define M-while
     (lambda (condition body state)
-        (if (M-value condition)
-            (M-while condition body (M-state-statement body (M-state-statement condition state)))
-            (M-state-statement condition state)
-            )))
+        (if (M-value condition state)
+            (M-while condition body (M-state-statement body state))
+            state)))
 
 (define M-return
     (lambda (exp state)
-        (M-value exp state))
-    )
+        (setValue 'return_value (M-value exp state) state)))
 
 (define M-assignment
     (lambda (var exp state)
-        (setValue var (M-value exp state) state )
-    ))
+        (if (declared var state)
+            (setValue var (M-value exp state) state)
+            (error 'variable-not-declared))))
 
 (define M-declaration
     (lambda (var state)
-        (cons (cons (var (car state))) (cons ('error (cdr state))))
-    ))
+        (if (declared var state)
+            (error 'variable_already_declared)
+            (setValue var 'error state))))
 
 (define M-declaration-val
-    (lambda (var value state)
-        (cons (cons (var (car state))) (cons ((M-value value state) (cdr state))))
-    ))
+    (lambda (var val state)
+        (if (declared var state)
+            (error 'variable_already_declared)
+            (setValue var val state))))
+
+(interpret "testcock.txt")
