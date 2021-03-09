@@ -14,7 +14,7 @@
 (define evalfile
     (lambda (lis state)
       (cond
-        ((not(eq? (getValue 'return_value state) 'error)) (getValue 'return_value state))
+        ((not(eq? (getValue 'return_value state) 'error)) (niceReturn(getValue 'return_value state)))
         ((null? lis)                   (error 'nothing_here_bro))
         ;((eq? (car (car lis)) 'return) (getValue 'return_value (M-return (cadar lis) state)))
         (else                          (evalfile (cdr lis) (M-state-statement (car lis) state))))))
@@ -28,6 +28,14 @@
 (define leftoperand (lambda (exp) (cadr exp)))
 (define operator (lambda (exp) (car exp)))
 (define rightoperand (lambda (exp) (caddr exp)))
+
+;changes the return type to a nice output
+(define niceReturn
+  (lambda (v)
+    (cond
+      ((eq? v #t) 'true)
+      ((eq? v #f) 'false)
+      (else v))))
 
 ;returns if the variable is declared in a given state
 (define declared
@@ -97,8 +105,8 @@
                ((eq? (operator exp) '/)     (M-integer exp / state))
                (else                        (error 'bad_operator)))
             (cond
-                ((or (eq? exp 'true) (eq? exp #t))          'true)
-                ((or (eq? exp 'false) (eq? exp #f))          'false)
+                ((or (eq? exp 'true) (eq? exp #t))          #t)
+                ((or (eq? exp 'false) (eq? exp #f))          #f)
                 ((number? exp)              exp)
                 ((not (declared exp state)) (error 'undeclared_variable))
                 ((eq? (getValue exp state) 'error) (error 'unassigned_variable))
