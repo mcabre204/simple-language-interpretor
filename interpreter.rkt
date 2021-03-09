@@ -9,16 +9,21 @@
 
 (define interpret
 	(lambda (file)
-		 (evalfile (parser file) '((return_value) (error)))))
+		 (evalfile (parser file) (init 'return_value 'error))))
+         
+(define init
+    (lambda (v w)
+        (list (list v) (list w))))
 
 (define evalfile
     (lambda (lis state)
       (cond
-        ((not(eq? (getValue 'return_value state) 'error)) (niceReturn(getValue 'return_value state)))
+        ((not(eq? (getValue 'return_value state) 'error)) (getValue 'return_value state))
         ((null? lis)                   (error 'nothing_here_bro))
         ;((eq? (car (car lis)) 'return) (getValue 'return_value (M-return (cadar lis) state)))
         (else                          (evalfile (cdr lis) (M-state-statement (car lis) state))))))
 
+;;;; HELPER FUNCTIONS -----------------------------------------------------------------------
 ;argument helpers
 (define arg1 (lambda (lis) (cadr lis)))
 (define arg2 (lambda (lis) (caddr lis)))
@@ -28,14 +33,8 @@
 (define leftoperand (lambda (exp) (cadr exp)))
 (define operator (lambda (exp) (car exp)))
 (define rightoperand (lambda (exp) (caddr exp)))
-
-;changes the return type to a nice output
-(define niceReturn
-  (lambda (v)
-    (cond
-      ((eq? v #t) 'true)
-      ((eq? v #f) 'false)
-      (else v))))
+(define myor (lambda (v w) (or v w)))
+(define myand (lambda (v w) (and v w)))
 
 ;returns if the variable is declared in a given state
 (define declared
@@ -67,24 +66,10 @@
     (lambda (var val state)
         (setValue-helper var val state (lambda (v w) (list v w)))))
 
-(define M-state-statement
-    (lambda (statement state)
-        (cond
-            ((eq? (car statement) 'var)   (if (eq? (length statement) 2)
-                                            (M-declaration (arg1 statement) state)
-                                            (M-declaration-val (arg1 statement) (M-value (arg2 statement) state) state)))
-            ((eq? (car statement) '=)     (M-assignment (arg1 statement)  (M-value (arg2 statement) state) state))
-            ((eq? (car statement) 'if)    (if (eq? (length statement) 3)
-                                            (M-if (arg1 statement) (arg2 statement) state)
-                                            (M-if-else (arg1 statement) (arg2 statement) (arg3 statement) state)))
-            ((eq? (car statement) 'while) (M-while (arg1 statement) (arg2 statement) state))
-            ((eq? (car statement) 'return) (M-return (arg1 statement) state))
-            (else                         (error 'bad_operator)))))
 
-;helper functions for and and or because racket is stupid
-(define myor (lambda (v w) (or v w)))
-(define myand (lambda (v w) (and v w)))
+;;;; MVALUE FUNCTIONS -------------------------------------------------------------------
 
+;Mvalue takes an expression exp and a state and returns the evaluation of exp in state
 (define M-value
     (lambda (exp state)
         (if (list? exp) 
@@ -108,60 +93,84 @@
                 ((or (eq? exp 'true) (eq? exp #t))          #t)
                 ((or (eq? exp 'false) (eq? exp #f))          #f)
                 ((number? exp)              exp)
-                ((not (declared exp state)) (error 'undeclared_variable))
-                ((eq? (getValue exp state) 'error) (error 'unassigned_variable))
-                (else (getValue exp state))))))
+                ((if (declared exp state)
+                                            (getValue exp state)
+                                            (error 'bad_operator)))
+                (else                       (error 'bad_operator))))))
 
+;handles expressions that return booleans for Mvalue
 (define M-boolean
     (lambda (exp op state)
         (if (eq? op not) 
             (not(M-value (leftoperand exp) state))
             (op (M-value (leftoperand exp) state) (M-value (rightoperand exp) state)))))
 
+;handles expressions that return integers for Mvalue
 (define M-integer
   (lambda (exp op state)
     (if (null? (cddr exp))
         (M-value (- (leftoperand exp)) state)
         (op (M-value (leftoperand exp) state) (M-value (rightoperand exp) state)))))
 
+;;;; MSTATE FUNCTIONS ------------------------------------------------------------------------------
+;M-state-statement takes any statement and calls its corresponding state function
+;the return value for M-state-statement and all of its helper functions is the resulting state
+(define M-state-statement
+    (lambda (statement state)
+        (cond
+            ((eq? (car statement) 'var)     (if (eq? (length statement) 2)
+                                                (M-declaration (arg1 statement) state)
+                                                (M-declaration-val (arg1 statement) (M-value (arg2 statement) state) state)))
+            ((eq? (car statement) '=)       (M-assignment (arg1 statement)  (M-value (arg2 statement) state) state))
+            ((eq? (car statement) 'if)      (if (eq? (length statement) 3)
+                                                (M-if (arg1 statement) (arg2 statement) state)
+                                                (M-if-else (arg1 statement) (arg2 statement) (arg3 statement) state)))
+            ((eq? (car statement) 'while)   (M-while (arg1 statement) (arg2 statement) state))
+            ((eq? (car statement) 'return)  (M-return (arg1 statement) state))
+            (else                           (error 'bad_operator)))))
+;State fucntion for if statements
 (define M-if
     (lambda (condition statement1 state) 
         (if (M-value condition state)
             (M-state-statement statement1 (M-state-statement condition state))
             (M-state-statement condition state))))
 
+;State function for if-else statements
 (define M-if-else
     (lambda (condition statement1 statement2 state)
         (if (M-value condition state)
             (M-state-statement statement1 state)
             (M-state-statement statement2 state))))
 
+;State function for while loops
 (define M-while
     (lambda (condition body state)
         (if (M-value condition state)
             (M-while condition body (M-state-statement body state))
             state)))
 
+;State function for return keyword
 (define M-return
     (lambda (exp state)
         (setValue 'return_value (M-value exp state) state)))
 
+;State function for assignment statements
 (define M-assignment
     (lambda (var exp state)
         (if (declared var state)
             (setValue var (M-value exp state) state)
             (error 'variable-not-declared))))
 
+;State function for declaration statements
 (define M-declaration
     (lambda (var state)
         (if (declared var state)
             (error 'variable_already_declared)
             (setValue var 'error state))))
 
+;State function for declaration assignment statements
 (define M-declaration-val
     (lambda (var val state)
         (if (declared var state)
             (error 'variable_already_declared)
             (setValue var val state))))
-
-(interpret "testcock.txt")
