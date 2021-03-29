@@ -17,15 +17,16 @@
     (lambda (lis state)
         (call/cc
             (lambda (break)
-                (M-state-statement-cc lis state break (lambda (v1) (error 'BreakError)) (lambda (v2) (error 'ContinueError)) (lambda (v3) (error 'ThrowError))))
+                (M-state-statement-cc lis state break (lambda (v1) (error 'BREAK_ERROR)) (lambda (v2) (error 'CONTINUE_ERROR)) (lambda (v3) (error 'THROW_ERROR))))
 
 ;; =====================================
 ;; HELPER FUNCTIONS
 ;; =====================================
 
-(define arg1 (lambda (lis) (cadr lis)))
-(define arg2 (lambda (lis) (caddr lis)))
-(define arg3 (lambda (lis) (cadddr lis)))
+(define arg1 (lambda (lis) (cadar lis)))
+(define arg2 (lambda (lis) (caddar lis)))
+(define arg3 (lambda (lis) (caddar lis)))
+(define operation caar)
 (define leftoperand (lambda (exp) (cadr exp)))
 (define operator (lambda (exp) (car exp)))
 (define rightoperand (lambda (exp) (caddr exp)))
@@ -35,6 +36,7 @@
 ;; =====================================
 ;; STATE LAYER FUNCTIONS
 ;; =====================================
+
 
 ; returns if the variable is declared in a given state, no matter what layer it's in
 (define declared
@@ -119,7 +121,7 @@
                ((eq? (operator exp) '*)             (M-integer exp * state))
                ((eq? (operator exp) '%)             (M-integer exp modulo state))
                ((eq? (operator exp) '/)             (M-integer exp (lambda (v w) (floor (/ v w))) state))
-               (else                                (error 'bad_operator)))
+               (else                                (error 'BAD_OPERATOR)))
             (cond
                 ((or (eq? exp 'true) (eq? exp #t))  #t)
                 ((or (eq? exp 'false) (eq? exp #f)) #f)
@@ -127,7 +129,7 @@
                 ((if (declared exp state)
                     (getValue exp state)
                     (error 'bad_operator)))
-                (else                               (error 'bad_operator))))))
+                (else                               (error 'BAD_OPERATOR))))))
 
 ; handles expressions that return booleans for Mvalue
 (define M-boolean
@@ -151,26 +153,32 @@
     (lambda (lis state return break continue throw)
         (cond
             ((null? lis) state)
-            ((eq? (car lis) 'return)  (break (Mboolean (cadar lis) state))))
-            ((eq? (car lis) 'var)     (if (eq? (length statement) 2)
-                                          (M-state-statement-cc (cdr lis) (M-declaration (arg1 lis) state) return break continue throw))
-                                          (M-state-statement-cc (cdr lis) (M-declaration-val (arg1 lis) (M-value (arg2 lis) state)) return break continue throw)))
-            ((eq? (car lis) '=)       (M-state-statement-cc (cdr lis) ((M-assignment (arg1 lis)  (M-value (arg2 lis) state) state)) return break continue throw))
-            ((eq? (car lis) 'if)      (if (eq? (length lis) 3)
-                                          (M-state-statement-cc (cdr lis) (M-if (arg1 lis) (arg2 lis) state return break continue throw) return break continue throw)
-                                          (M-if-else (arg1 lis) (arg2 lis) (arg3 lis) state return break continue throw) return break continue throw))
-            ((eq? (car lis) 'while)   (M-state-statement-cc (cdr lis) 
-                                                (call/cc
-                                                    (lambda (newBreak)
-                                                        (statement-cc (cdr lis)
-                                                            (M-while (arg1 lis) (arg2 lis) state return newBreak continue throw)
-                                                            return newBreak continue throw))) return break continue throw))
-            ((eq? (car lis) 'begin)   (M-state-statement-cc (cdr lis) (removeLayer (M-state-statement-cc (cdr lis) (addLayer state) return break continue throw)) return break continue throw)) return break continue throw))
-            ((eq? (car lis) 'break)   (whileBreak (removeLayer state)))
-            ((eq? (car lis) 'try)     (M-state-statement-cc (cdr lis) (M-try (arg1 lis) return break continue throw) return break continue throw))
-            ((eq? (car lis) 'throw)   (throw IDFK
-            ((eq? (car lis) 'finally) (M-state-statement-cc (cdr lis) (M-try (arg1 lis) return break continue throw))
-            (else                     (error 'BAD_STATEMENT)))))
+            ((eq? (operation lis) 'return)   (return (Mboolean (cadar lis) state))))
+            ((eq? (operation lis) 'var)      (if (eq? (length statement) 2)
+                                                 (M-state-statement-cc (cdr lis) (M-declaration (arg1 lis) state) return break continue throw))
+                                                 (M-state-statement-cc (cdr lis) (M-declaration-val (arg1 lis) (M-value (arg2 lis) state) state) return break continue throw)))
+            ((eq? (operation lis) '=)        (M-state-statement-cc (cdr lis) ((M-assignment (arg1 lis)  (M-value (arg2 lis) state) state)) return break continue throw))
+            ((eq? (operation lis) 'if)       (if (eq? (length lis) 3)
+                                                 (M-state-statement-cc (cdr lis) (M-if (arg1 lis) (arg2 lis) state return break continue throw) return break continue throw)
+                                                 (M-state-statement-cc (cdr lis) (M-if-else (arg1 lis) (arg2 lis) (arg3 lis) state return break continue throw) return break continue throw)))
+            ((eq? (operation lis) 'while)    (M-state-statement-cc (cdr lis) 
+                                                 (call/cc
+                                                     (lambda (newBreak)
+                                                         (statement-cc (cdr lis)
+                                                             (M-while (arg1 lis) (arg2 lis) state return newBreak continue throw)
+                                                             return break continue throw)))))
+            ((eq? (operation lis) 'break)    (break (cdr state)))
+            ((eq? (operation lis) 'continue) (continue (cdr state))) 
+            ;;                                                                  NOT SURE BOUT THIS
+            ((eq? (operation lis) 'throw)   (throw (addLayer (M-declaration-val 'throw (M-value (arg1 lis) (cadar lis) state) state))))
+            ;;                                                                          OR
+                                        
+                                                
+
+            ((eq? (operation lis) 'begin)    (M-state-statement-cc (cdr lis) (removeLayer (M-state-statement-cc (cdar lis) (addLayer state) return break continue throw)) return break continue throw)           
+            ((eq? (operation lis) 'try)      (M-state-statement-cc (cdr lis) (M-try (arg1 lis) state return break continue throw) return break continue throw)       
+            ((eq? (operation lis) 'finally)  (M-state-statement-cc (cadar lis) state return break continue throw))
+            (else                            (error 'BAD_STATEMENT)))))
 
 ; State function for if statements
 (define M-if
@@ -223,41 +231,43 @@
 
 ; State function for declaration statements
 (define M-declaration
-    (lambda (var state return break continue throw)
+    (lambda (var state)
         (if (declared var state)
             (error 'variable_already_declared)
             (setValue var 'error state))))
 
 ; State function for declaration assignment statements
 (define M-declaration-val
-    (lambda (var val state return break continue throw)
+    (lambda (var val state)
         (if (declared var state)
             (error 'variable_already_declared)
             (setValue var val state))))
 
 (define M-try
-    (lambda (lis state return break continue throw)
+    (lambda (exp state return break continue throw)
         (cond
-            ((null? lis) state)
-            ((null? (cadr lis)) (M-state-statement-cc (cddr lis)
+            ((null? exp) state)
+            ((null? (cadr exp)) (M-state-statement-cc (cddr exp) ;no catch maybe wrong
                 (call/cc
                     (lambda (newThrow1)
-                        (M-state-statement-cc (car lis) state return break continue newThrow1)))
+                        (M-state-statement-cc (body exp) state return break continue newThrow1)))
                 return break continue throw))
-            (hasEnd lis) (M-state-statement-cc (cddr lis) (M-catch (catchExp lis)
-                (call/cc
-                    (lambda (newThrow2)
-                        (M-state-statement-cc (car lis) state return break continue newThrow2)))
-                return break continue throw))
-            (else (M-catch (catchExp lis)
-                (call/cc
-                    (lambda (newThrow3)
-                        (M-state-statement-cc (car lis) state return break continue newThrow3)))
-                return break continue throw)))))
-
+            ((hasEnd exp) (M-state-statement-cc (cddr exp) 
+                                (M-catch (catchExp exp)
+                                    (call/cc
+                                        (lambda (newThrow2)
+                                            (M-state-statement-cc (body exp) state return break continue newThrow2)))
+                                return break continue throw))
+                           return break continue throw))
+            (else (M-catch (catchExp exp) ;no finally
+                    (call/cc
+                        (lambda (newThrow3)
+                            (M-state-statement-cc (body exp) state return break continue newThrow3)))
+                    return break continue throw))))
 ; Helpers For M-Try
 ; defines the Catch Statement Expression
 (define catchExp cdadr)
+(define body car)
 ; checks the end of lis
 (define hasEnd
   (lambda (lis)
@@ -266,8 +276,8 @@
         #t)))
 
 (define M-catch
-    (lambda (statement state break whileContinue whileBreak throw)
+    (lambda (statement state return break continue throw)
         (cond 
-            (null? statement)        'NO_CATCH_STATEMENT)
-            ((member*? 'throw state) (M-state-statement-cc (cadr statement) (M-declare (list (caar statement) (getValue 'throw state)) state) return break continue throw))
-            (else                    state))))
+            ((null? statement)                             'NO_CATCH_STATEMENT))
+            ((eq? (getValue 'throw state) (cadr statement) ((M-state-statement-cc (cadr statement) state return break continue throw)))
+            (else  (error (getValue 'throw state))))))
