@@ -169,12 +169,7 @@
                                                              return break continue throw)))))
             ((eq? (operation lis) 'break)    (break (cdr state)))
             ((eq? (operation lis) 'continue) (continue (cdr state))) 
-            ;;                                                                  NOT SURE BOUT THIS
-            ((eq? (operation lis) 'throw)   (throw (addLayer (M-declaration-val 'throw (M-value (arg1 lis) (cadar lis) state) state))))
-            ;;                                                                          OR
-                                        
-                                                
-
+            ((eq? (operation lis) 'throw)    (throw (addLayer (M-declaration-val 'throw (M-value (arg1 lis) (cadar lis) state) state))))                                            
             ((eq? (operation lis) 'begin)    (M-state-statement-cc (cdr lis) (removeLayer (M-state-statement-cc (cdar lis) (addLayer state) return break continue throw)) return break continue throw)           
             ((eq? (operation lis) 'try)      (M-state-statement-cc (cdr lis) (M-try (arg1 lis) state return break continue throw) return break continue throw)       
             ((eq? (operation lis) 'finally)  (M-state-statement-cc (cadar lis) state return break continue throw))
@@ -185,7 +180,7 @@
     (lambda (condition statement1 state return break continue throw)
         (if (M-value condition state)
             (M-state-statement-cc statement1 state return break continue throw)
-            (M-state-statement-cc condition state return break continue throw))))
+            state)))
 
 ; State function for if-else statements
 (define M-if-else
@@ -197,25 +192,20 @@
 ; CC helper function for M-while
 (define M-while-cc
     (lambda (condition body state return break continue throw)
-        (if (M-value (car condition) state) 
-            (M-while-cc condition (M-state-statement-cc (cons (cadr condition) '()) state return break continue throw) return break continue throw))
-            (else                             state))))
+        (if (M-value condition state) 
+            (M-while-cc condition body (M-state-statement-cc (cons s '()) state return break continue throw) return break continue throw)
+            state)))
+
+;Main while loop, sets continue continuation
 (define M-while
     (lambda (condition body state return break continue throw)
-        (if (M-value (car condition) state) 
-            (M-while condition 
+        (if (M-value condition state) 
+            (M-while condition body state
                 (call/cc
                     (lambda (newContinue)
-                        (M-while-cc condition state return break newContinue throw)))
-                return break continue throw))
-            (else                             state))))
-
-; State function for while loops
-(define M-while
-    (lambda (condition body state return break continue throw)
-        (if (M-value condition state)
-            (M-while condition body (M-state-statement body state return break continue throw))
-            state))
+                        (M-while-cc condition body state return break newContinue throw)))
+                return break continue throw)
+            state)))
 
 ; State function for return keyword
 (define M-return
